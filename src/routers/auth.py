@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from src.db.database import get_db
 from src.models.users import User
+
 from src.services.auth_service import (
     create_access_token,
     create_refresh_token,
