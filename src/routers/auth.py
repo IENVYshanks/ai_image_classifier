@@ -106,3 +106,38 @@ def refresh(payload: RefreshRequest) -> AccessTokenResponse:
         )
 
     return AccessTokenResponse(access_token=create_access_token(subject))
+
+
+@router.get("/google/login")
+async def google_login():
+    from src.services.google_auth import get_oauth_client
+    client = get_oauth_client()
+    authorization_url, state = client.create_authorization_url(
+        "https://accounts.google.com/o/oauth2/auth",
+        scope=["openid", "email", "profile"],
+    )
+    return {"authorization_url": authorization_url, "state": state}
+
+
+@router.get("/google/callback")
+async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+    from src.services.google_auth import get_oauth_client
+    client = get_oauth_client()
+    token = await client.fetch_token(
+        "https://oauth2.googleapis.com/token",
+        code=code,
+    )
+    # Fetch user info
+    user_info = await client.get("https://www.googleapis.com/oauth2/v2/userinfo")
+    user_data = user_info.json()
+    
+    # Check if user exists, else create
+    user = db.query(User).filter(User.email == user_data["email"]).first()
+    if not user:
+        user = User(email=user_data["email"], hashed_password="")  # No password for OAuth
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    
+    # Generate JWT tokens
+    return build_token_response(user)

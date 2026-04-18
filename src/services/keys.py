@@ -5,7 +5,8 @@ class Token(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES : int
     SECRET_KEY : str
     REFRESH_TOKEN_EXPIRE_DAYS : int
-
+    GOOGLE_CLIENT_ID: str  # Example: "123456789-abcdef.apps.googleusercontent.com"
+    GOOGLE_CLIENT_SECRET: str  # Example: "GOCSPX-abc123def456"
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',
