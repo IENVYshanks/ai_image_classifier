@@ -3,6 +3,7 @@ from pydantic import computed_field
 from functools import lru_cache
 from sqlalchemy.ext.declarative import declarative_base
 
+
 Base = declarative_base()
 
 class Settings(BaseSettings):
@@ -30,3 +31,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
