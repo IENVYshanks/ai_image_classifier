@@ -1,11 +1,22 @@
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
-from src.db.config import get_settings, Base
+from sqlalchemy.orm import sessionmaker
+
+from src.db.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.DATABASE_URI, echo=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_engine(
+    settings.DATABASE_URI,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+    bind=engine,
+)
 
 def get_db():
     db = SessionLocal()
@@ -13,6 +24,4 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
 

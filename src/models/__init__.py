@@ -1,7 +1,21 @@
-from src.models.access_grant import AccessGrant
-from src.models.image_face import ImageFace
-from src.models.person import Person
-from src.models.token import DriveToken
+from src.models.clustering_job import ClusteringJob
+from src.models.face import Face
+from src.models.image import Image
+from src.models.ingestion_job import IngestionJob
+from src.models.person_cluster import PersonCluster
+from src.models.search_query import SearchQuery
+from src.models.search_result import SearchResult
+from src.models.user_folder import UserFolder
 from src.models.users import User
 
-__all__ = ["AccessGrant", "DriveToken", "ImageFace", "Person", "User"]
+__all__ = [
+    "ClusteringJob",
+    "Face",
+    "Image",
+    "IngestionJob",
+    "PersonCluster",
+    "SearchQuery",
+    "SearchResult",
+    "User",
+    "UserFolder",
+]

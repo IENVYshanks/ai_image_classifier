@@ -1,4 +1,5 @@
 import jwt
+from fastapi.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,26 +11,31 @@ from src.services.auth_service import (
     create_access_token,
     create_refresh_token,
     decode_jwt,
-    hash_password,
-    verify_password,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
-    username: str
     email: str
-    password: str
+    name: str | None = None
 
 
 class LoginRequest(BaseModel):
     email: str
-    password: str
 
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class GoogleSessionRequest(BaseModel):
+    email: str
+    name: str | None = None
+    avatar_url: str | None = None
+    google_id: str | None = None
+    drive_access_token: str
+    drive_refresh_token: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -52,8 +58,10 @@ def build_token_response(user: User) -> TokenResponse:
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    existing_user = db.query(User).filter(User.email == payload.email).first()
+async def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    existing_user = await run_in_threadpool(
+        lambda: db.query(User).filter(User.email == payload.email).first()
+    )
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -61,26 +69,55 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenRe
         )
 
     user = User(
-        username=payload.username,
         email=payload.email,
-        hashed_password=hash_password(payload.password),
+        name=payload.name,
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    await run_in_threadpool(db.add, user)
+    await run_in_threadpool(db.commit)
+    await run_in_threadpool(db.refresh, user)
 
     return build_token_response(user)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    user = db.query(User).filter(User.email == payload.email).first()
-    if user is None or not verify_password(payload.password, user.hashed_password):
+async def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    user = await run_in_threadpool(
+        lambda: db.query(User).filter(User.email == payload.email).first()
+    )
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="User not found",
         )
 
+    return build_token_response(user)
+
+
+@router.post("/google/session", response_model=TokenResponse)
+async def create_google_session(
+    payload: GoogleSessionRequest,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    user = await run_in_threadpool(
+        lambda: db.query(User).filter(User.email == payload.email).first()
+    )
+    if user is None:
+        user = User(
+            email=payload.email,
+            name=payload.name,
+            avatar_url=payload.avatar_url,
+            google_id=payload.google_id,
+        )
+        await run_in_threadpool(db.add, user)
+    else:
+        user.name = payload.name or user.name
+        user.avatar_url = payload.avatar_url or user.avatar_url
+        user.google_id = payload.google_id or user.google_id
+
+    user.drive_access_token = payload.drive_access_token
+    user.drive_refresh_token = payload.drive_refresh_token or user.drive_refresh_token
+    await run_in_threadpool(db.commit)
+    await run_in_threadpool(db.refresh, user)
     return build_token_response(user)
 
 
@@ -108,38 +145,3 @@ def refresh(payload: RefreshRequest) -> AccessTokenResponse:
         )
 
     return AccessTokenResponse(access_token=create_access_token(subject))
-
-
-@router.get("/google/login")
-async def google_login():
-    from src.services.google_auth import get_oauth_client
-    client = get_oauth_client()
-    authorization_url, state = client.create_authorization_url(
-        "https://accounts.google.com/o/oauth2/auth",
-        scope=["openid", "email", "profile"],
-    )
-    return {"authorization_url": authorization_url, "state": state}
-
-
-@router.get("/google/callback")
-async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
-    from src.services.google_auth import get_oauth_client
-    client = get_oauth_client()
-    token = await client.fetch_token(
-        "https://oauth2.googleapis.com/token",
-        code=code,
-    )
-    # Fetch user info
-    user_info = await client.get("https://www.googleapis.com/oauth2/v2/userinfo")
-    user_data = user_info.json()
-    
-    # Check if user exists, else create
-    user = db.query(User).filter(User.email == user_data["email"]).first()
-    if not user:
-        user = User(email=user_data["email"], hashed_password="")  # No password for OAuth
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    
-    # Generate JWT tokens
-    return build_token_response(user)

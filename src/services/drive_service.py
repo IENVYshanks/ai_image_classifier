@@ -1,72 +1,102 @@
-from googleapiclient.discovery import build
+from __future__ import annotations
+
+import logging
+from typing import Any
+
 from google.oauth2.credentials import Credentials
-from src.models.token import DriveToken
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
-import io
-from PIL import Image
+
+from src.models.users import User
+
+logger = logging.getLogger(__name__)
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 
 def get_drive_service(user_id, db: Session):
     """
-    Authenticate with Google Drive using stored token
+    Build a Google Drive API client from the user's stored access token.
     """
-    drive_token = db.query(DriveToken).filter(DriveToken.user_id == user_id).first()
-    if not drive_token:
-        raise ValueError("No Drive token found for user")
-    
-    # Use stored access token (should be decrypted if encrypted)
-    credentials = Credentials(token=drive_token.access_token_enc)
-    return build('drive', 'v3', credentials=credentials)
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not user.drive_access_token:
+        logger.warning("No Google Drive token found for user_id=%s", user_id)
+        raise ValueError("No Google Drive access token found for user")
+
+    credentials = Credentials(
+        token=user.drive_access_token,
+        refresh_token=user.drive_refresh_token,
+    )
+    return build("drive", "v3", credentials=credentials)
 
 
-def list_images_in_folder(folder_id: str, user_id, db: Session):
+def list_images_in_folder(folder_id: str, user_id, db: Session) -> list[dict[str, Any]]:
     """
-    List all image files in a Google Drive folder
+    List images in a Google Drive folder with enough metadata for ingestion.
+    Only image files directly inside the selected folder are included.
     """
     service = get_drive_service(user_id, db)
-    
-    query = f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false"
-    results = service.files().list(
-        q=query,
-        spaces='drive',
-        fields='files(id, name, mimeType)',
-        pageSize=1000
-    ).execute()
-    
-    return results.get('files', [])
+    files: list[dict[str, Any]] = []
+    raw_item_count = 0
+    sample_items: list[str] = []
+    page_token = None
+    while True:
+        response = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                spaces="drive",
+                fields=(
+                    "nextPageToken, "
+                    "files(id, name, mimeType, size, imageMediaMetadata(width,height,time))"
+                ),
+                pageSize=1000,
+                pageToken=page_token,
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        batch = response.get("files", [])
+        for item in batch:
+            raw_item_count += 1
+            mime_type = item.get("mimeType", "")
+            if len(sample_items) < 20:
+                sample_items.append(
+                    f"{item.get('name', '<unnamed>')} [{mime_type or 'unknown'}]"
+                )
+            if mime_type.startswith("image/"):
+                files.append(item)
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    logger.info(
+        "Listed %s direct Drive image files for user_id=%s folder_id=%s raw_items_seen=%s sample_items=%s",
+        len(files),
+        user_id,
+        folder_id,
+        raw_item_count,
+        sample_items,
+    )
+    return files
 
 
-def download_image_from_drive(file_id: str, user_id, db: Session):
-    """
-    Download image from Google Drive and return as PIL Image
-    """
+def get_folder_metadata(folder_id: str, user_id, db: Session) -> dict[str, Any]:
     service = get_drive_service(user_id, db)
-    request = service.files().get_media(fileId=file_id)
-    file_content = request.execute()
-    
-    image = Image.open(io.BytesIO(file_content))
-    return image
+    return (
+        service.files()
+        .get(fileId=folder_id, fields="id, name, mimeType")
+        .execute()
+    )
 
 
-def create_person_folder(person_label: str, parent_folder_id: str, user_id, db: Session):
-    """
-    Create a new folder in Google Drive for a person cluster
-    """
+def download_file_bytes(file_id: str, user_id, db: Session) -> bytes:
     service = get_drive_service(user_id, db)
-    
-    file_metadata = {
-        'name': f"Person - {person_label}",
-        'mimeType': 'application/vnd.google-apps.folder',
-        'parents': [parent_folder_id]
-    }
-    folder = service.files().create(body=file_metadata, fields='id').execute()
-    return folder.get('id')
+    logger.debug("Downloading Drive file_id=%s for user_id=%s", file_id, user_id)
+    return service.files().get_media(fileId=file_id).execute()
 
 
-def copy_file_in_drive(file_id: str, destination_folder_id: str, user_id, db: Session):
-    """
-    Copy an image file to a person folder in Google Drive
-    """
-    service = get_drive_service(user_id, db)
-    metadata = {'parents': [destination_folder_id]}
-    service.files().copy(fileId=file_id, body=metadata).execute()
+def is_drive_access_error(exc: Exception) -> bool:
+    return isinstance(exc, (HttpError, ValueError))

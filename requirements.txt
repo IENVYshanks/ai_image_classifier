@@ -8,10 +8,15 @@ pydantic-settings
 jwt
 authlib
 httpx
+supabase
+qdrant-client
+python-multipart
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
-deepface
+insightface
+onnxruntime
+opencv-python-headless
 scikit-learn
 Pillow
 numpy
