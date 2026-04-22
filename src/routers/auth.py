@@ -18,6 +18,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
+    username: str
     email: str
     password: str
 
@@ -60,6 +61,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenRe
         )
 
     user = User(
+        username=payload.username,
         email=payload.email,
         hashed_password=hash_password(payload.password),
     )
