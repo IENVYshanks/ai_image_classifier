@@ -36,17 +36,21 @@ def upsert_user_folder(
     db.refresh(folder)
     return folder
 
+
 def mark_folder_processing(
     db: Session,
     folder: UserFolder,
     *,
     auto_commit: bool = True,
 ) -> UserFolder:
+    now = datetime.now(timezone.utc)
     folder.status = "processing"
-    folder.started_at = folder.started_at or datetime.now(timezone.utc)
+    folder.started_at = now
     folder.completed_at = None
     folder.error_message = None
-    folder.updated_at = datetime.now(timezone.utc)
+    folder.processed_images = 0
+    folder.failed_images = 0
+    folder.updated_at = now
     if auto_commit:
         db.commit()
         db.refresh(folder)

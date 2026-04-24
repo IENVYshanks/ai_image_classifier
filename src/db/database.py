@@ -9,7 +9,9 @@ engine = create_engine(
     settings.DATABASE_URI,
     echo=False,
     pool_pre_ping=True,
-    pool_recycle=1800,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
 )
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -24,4 +26,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

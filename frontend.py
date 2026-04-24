@@ -175,6 +175,20 @@ def go_to_root_folder() -> None:
     st.rerun()
 
 
+def clear_drive_browser_cache() -> None:
+    st.cache_data.clear()
+    st.session_state.pop("manual_drive_folder_id", None)
+    st.session_state.pop("manual_drive_folder_name", None)
+    st.rerun()
+
+
+def clear_backend_ingestion_state() -> None:
+    st.session_state.pop("latest_ingestion_job_id", None)
+    st.session_state.pop("latest_ingestion_job", None)
+    st.session_state.pop("latest_search_response", None)
+    st.rerun()
+
+
 st.title("AI Image Classifier")
 
 if not st.user.is_logged_in:
@@ -201,7 +215,9 @@ else:
         try:
             backend_token = sync_backend_session(token)
         except requests.RequestException as exc:
+            st.session_state.pop("backend_access_token", None)
             st.error(f"Could not connect to backend at {BACKEND_URL}: {exc}")
+            st.info("Drive browsing is still available, but ingestion and search need the backend to be running.")
 
         current_job = None
         current_job_status = None
@@ -224,7 +240,7 @@ else:
                 st.error(f"Could not fetch ingested files: {exc}")
 
         st.subheader("Google Drive")
-        st.caption("Browse your Drive directly and choose a folder to ingest.")
+        st.caption("This section shows live files from Google Drive, not rows from your database.")
 
         st.caption("Using the native Drive browser for folder selection.")
 
@@ -248,6 +264,11 @@ else:
             go_to_parent_folder()
         breadcrumb_line = " / ".join(breadcrumb["name"] for breadcrumb in breadcrumb_labels)
         nav_cols[2].caption(f"Path: {breadcrumb_line}")
+
+        drive_action_cols = st.columns([2, 3, 7])
+        if drive_action_cols[0].button("Refresh Drive", use_container_width=True):
+            clear_drive_browser_cache()
+        drive_action_cols[1].caption("Clears cached Drive folder data and reloads this view.")
 
         if len(breadcrumb_labels) > 1:
             breadcrumb_cols = st.columns(len(breadcrumb_labels))
@@ -311,7 +332,7 @@ else:
         browse_tab, ingested_tab = st.tabs(["Folder Photos", "Ingested Photos"])
 
         with browse_tab:
-            st.subheader("Files Uploaded By You")
+            st.subheader("Google Drive Photos")
             if file_rows:
                 my_uploaded_rows = [item for item in file_rows if item.get("ownedByMe")]
                 st.caption(f"Image files uploaded by you in this folder: {len(my_uploaded_rows)}")
@@ -335,7 +356,8 @@ else:
                 st.info("No image files found in this folder.")
 
         with ingested_tab:
-            st.subheader("All Ingested Photos")
+            st.subheader("Backend Ingested Photos")
+            st.caption("This tab is backed by `/ingestion/images` from the FastAPI backend.")
             if ingested_images:
                 st.dataframe(
                     [
@@ -357,6 +379,10 @@ else:
 
         if backend_token:
             st.subheader("Ingestion")
+            ingest_action_cols = st.columns([2, 3, 7])
+            if ingest_action_cols[0].button("Clear Ingestion State", use_container_width=True):
+                clear_backend_ingestion_state()
+            ingest_action_cols[1].caption("Clears saved job and search state from this Streamlit session.")
             if st.button("Ingest current folder", type="primary"):
                 try:
                     chosen_folder_id = manual_folder_id.strip() or current_folder_id

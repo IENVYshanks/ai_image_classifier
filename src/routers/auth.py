@@ -143,5 +143,5 @@ def refresh(payload: RefreshRequest) -> AccessTokenResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token subject missing",
         )
-
+    
     return AccessTokenResponse(access_token=create_access_token(subject))
